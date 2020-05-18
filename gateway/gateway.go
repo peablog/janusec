@@ -8,14 +8,19 @@
 package gateway
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Janusec/janusec/backend"
@@ -30,8 +35,28 @@ import (
 )
 
 var (
-	store = sessions.NewCookieStore([]byte("janusec"))
+	store  = sessions.NewCookieStore([]byte("janusec"))
+	gzPool = sync.Pool{
+		New: func() interface{} {
+			w := gzip.NewWriter(ioutil.Discard)
+			return w
+		},
+	}
 )
+
+type gzipResponseWriter struct {
+	io.Writer
+	http.ResponseWriter
+}
+
+func (w *gzipResponseWriter) WriteHeader(status int) {
+	w.Header().Del("Content-Length")
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
 
 // ReverseHandlerFunc used for reverse handler
 func ReverseHandlerFunc(w http.ResponseWriter, r *http.Request) {
@@ -53,24 +78,30 @@ func ReverseHandlerFunc(w http.ResponseWriter, r *http.Request) {
 	}
 	r.URL.Scheme = app.InternalScheme
 	r.URL.Host = r.Host
-
-	//appID_str := strconv.Itoa(app.AppID)
+	//Cache
+	appidStr := strconv.Itoa(int(app.ID))
 	//fmt.Println("ReverseHandlerFunc, r.URL.Path:", r.URL.Path)
-	/*
-	   is_static := backend.IsStaticDir(domain, r.URL.Path)
-	   fmt.Println("is_static:", is_static)
-	   if r.Method=="GET" && is_static {
-	       static_root := "./cdn_static_files/" + appID_str + "/"
-	       fmt.Println(static_root)
-	       staticHandler := http.FileServer(http.Dir(static_root))
-	       if strings.HasSuffix(r.URL.Path, "/") {
-	           http.ServeFile(w, r, "./static_files/warning.html")
-	           return
-	       }
-	       staticHandler.ServeHTTP(w, r)
-	       return
-	   }
-	*/
+	isStatic := backend.IsStaticDir(domain.Name, r.URL.Path)
+	fmt.Println("is_static:", isStatic)
+	if r.Method == "GET" && isStatic {
+		staticRoot := "./cdn_static_files/" + appidStr + "/"
+		if strings.HasSuffix(r.URL.Path, "/") {
+			http.ServeFile(w, r, "./cdn_static_files/warning.html")
+			return
+		}
+		staticHandler := http.FileServer(http.Dir(staticRoot))
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			staticHandler.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzPool.Get().(*gzip.Writer)
+		defer gzPool.Put(gz)
+		gz.Reset(w)
+		defer gz.Close()
+		staticHandler.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
+		return
+	}
 	// dynamic
 	srcIP := GetClientIP(r, app)
 	if app.WAFEnabled && !firewall.IsStaticResource(r) {

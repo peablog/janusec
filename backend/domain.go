@@ -8,6 +8,13 @@
 package backend
 
 import (
+	"fmt"
+	"github.com/Janusec/janusec/utils"
+	"io"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/Janusec/janusec/data"
@@ -48,45 +55,46 @@ func LoadDomains() {
 	}
 }
 
-/*
-func IsStaticDir(domain string, path string) (bool) {
-    if strings.Contains(path, "?") {
-        return false
-    }
-    app := DomainsMap[domain].App
-    static_dirs := app.StaticDirs
-    for _, static_dir := range static_dirs {
-        if strings.HasPrefix(path, static_dir) {
-            local_static_file := "./user_static_files/" + strconv.Itoa(app.ID) + path
-            fmt.Println("local_static_file:", local_static_file)
-            if _, err := os.Stat(local_static_file); os.IsNotExist(err) {
-                fmt.Println("FileNotExist:", local_static_file)
-                dest := app.SelectDestination()
-                target_url := app.InternalScheme + "://" + dest + path
-                req, err := http.NewRequest("GET", target_url, nil)
-                utils.CheckError(err)
-                req.Host = domain
-                client := &http.Client{}
-                resp, err := client.Do(req)
-                utils.CheckError(err)
-                defer resp.Body.Close()
-                utils.CheckError(err)
-                path_all := utils.GetDirAll(local_static_file)
-                fmt.Println("path_all:", path_all)
-                err = os.MkdirAll(path_all, 0777)
-                utils.CheckError(err)
-                f, err := os.Create(local_static_file)
-                utils.CheckError(err)
-                size, err := io.Copy(f, resp.Body)
-                utils.CheckError(err)
-                fmt.Println("CDN Copy:", target_url, size)
-            }
-            return true
-        }
-    }
-    return false
+func IsStaticDir(domain string, path string) bool {
+	if strings.Contains(path, "?") {
+		return false
+	}
+	vv, _ := DomainsMap.Load(domain)
+	app := vv.(models.DomainRelation).App
+	staticDirs := [1]string{"/static"}
+	for _, staticDir := range staticDirs {
+		if strings.HasPrefix(path, staticDir) {
+			localStaticFile := "./cdn_static_files/" + strconv.Itoa(int(app.ID)) + path
+			if _, err := os.Stat(localStaticFile); os.IsNotExist(err) {
+				fmt.Println("FileNotExist try get from origin site:", localStaticFile)
+				targetUrl := app.InternalScheme + "://" + app.Destinations[0].Destination + path
+				req, err := http.NewRequest("GET", targetUrl, nil)
+				utils.CheckError("new cache request error", err)
+				req.Host = domain
+				client := &http.Client{}
+				resp, err := client.Do(req)
+				utils.CheckError("do cache request error", err)
+				defer resp.Body.Close()
+				if resp.StatusCode != 200 {
+					return false
+				}
+				if len(resp.Header["Content-Type"]) > 0 && !utils.Contains([]string{"image/png", "text/css", "application/javascript"}, resp.Header["Content-Type"][0]) {
+					return false
+				}
+				pathAll := utils.GetDirAll(localStaticFile)
+				err = os.MkdirAll(pathAll, 0777)
+				utils.CheckError("create cache dir error", err)
+				f, err := os.Create(localStaticFile)
+				utils.CheckError("do cache file error", err)
+				size, err := io.Copy(f, resp.Body)
+				utils.CheckError("write cache file error", err)
+				fmt.Println("CDN Copy:", targetUrl, size)
+			}
+			return true
+		}
+	}
+	return false
 }
-*/
 
 func GetDomainByID(id int64) *models.Domain {
 	for _, domain := range Domains {
