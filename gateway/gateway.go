@@ -76,6 +76,10 @@ func ReverseHandlerFunc(w http.ResponseWriter, r *http.Request) {
 		RedirectRequest(w, r, "https://"+r.Host+r.URL.Path)
 		return
 	}
+	if domain == nil{
+		http.ServeFile(w, r, "./cdn_static_files/warning.html")
+		return
+	}
 	r.URL.Scheme = app.InternalScheme
 	r.URL.Host = r.Host
 	//Cache

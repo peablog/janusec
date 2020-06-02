@@ -61,9 +61,9 @@ func IsStaticDir(domain string, path string) bool {
 	}
 	vv, _ := DomainsMap.Load(domain)
 	app := vv.(models.DomainRelation).App
-	staticDirs := [1]string{"/static"}
-	for _, staticDir := range staticDirs {
-		if strings.HasPrefix(path, staticDir) {
+	fileExts := [6]string{".js", ".css", ".png", ".svg", ".jpg", ".jpeg"}
+	for _, ext := range fileExts {
+		if strings.HasSuffix(path, ext) {
 			localStaticFile := "./cdn_static_files/" + strconv.Itoa(int(app.ID)) + path
 			if _, err := os.Stat(localStaticFile); os.IsNotExist(err) {
 				fmt.Println("FileNotExist try get from origin site:", localStaticFile)
@@ -78,7 +78,7 @@ func IsStaticDir(domain string, path string) bool {
 				if resp.StatusCode != 200 {
 					return false
 				}
-				if len(resp.Header["Content-Type"]) > 0 && !utils.Contains([]string{"image/png", "text/css", "application/javascript"}, resp.Header["Content-Type"][0]) {
+				if len(resp.Header["Content-Type"]) > 0 && !utils.Contains([]string{"image", "text/css", "application/javascript"}, resp.Header["Content-Type"][0]) {
 					return false
 				}
 				pathAll := utils.GetDirAll(localStaticFile)
