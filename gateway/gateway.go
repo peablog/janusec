@@ -233,10 +233,9 @@ func ReverseHandlerFunc(w http.ResponseWriter, r *http.Request) {
 				}
 				http.Redirect(w, r, entranceURL, http.StatusTemporaryRedirect)
 				return
-			} else {
-				session.Values["userid"] = oauthState.UserID
-				session.Values["access_token"] = oauthState.AccessToken
 			}
+			session.Values["userid"] = oauthState.UserID
+			session.Values["access_token"] = oauthState.AccessToken
 			session.Options = &sessions.Options{Path: "/", MaxAge: int(app.SessionSeconds)}
 			session.Save(r, w)
 			http.Redirect(w, r, oauthState.CallbackURL, http.StatusTemporaryRedirect)
@@ -249,6 +248,10 @@ func ReverseHandlerFunc(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dest := backend.SelectBackendRoute(app, r)
+	if dest == nil {
+		w.Write([]byte("Error: No route found, please check the configuration."))
+		return
+	}
 
 	//fmt.Println("dest", dest, dest.RouteType)
 
@@ -256,7 +259,8 @@ func ReverseHandlerFunc(w http.ResponseWriter, r *http.Request) {
 		// Static Web site
 		staticHandler := http.FileServer(http.Dir(dest.BackendRoute))
 		if strings.HasSuffix(r.URL.Path, "/") {
-			http.ServeFile(w, r, dest.BackendRoute+r.URL.Path+dest.Destination)
+			targetFile := dest.BackendRoute + strings.Replace(r.URL.Path, dest.RequestRoute, "", 1) + dest.Destination
+			http.ServeFile(w, r, targetFile)
 			return
 		}
 		staticHandler.ServeHTTP(w, r)
@@ -336,6 +340,8 @@ func getOAuthEntrance(state string) (entranceURL string, err error) {
 			state)
 	case "ldap":
 		entranceURL = "/ldap/login?state=" + state
+	case "saml":
+		entranceURL = "/saml/login?state=" + state
 	default:
 		//w.Write([]byte("Designated OAuth not supported, please check config.json ."))
 		return "", errors.New("the OAuth provider is not supported, please check config.json")
