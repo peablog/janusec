@@ -96,10 +96,12 @@ func ReverseHandlerFunc(w http.ResponseWriter, r *http.Request) {
 		}
 		staticHandler := http.FileServer(http.Dir(staticRoot))
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			fmt.Println("hit cache but no gzip:", r.URL.Path)
 			staticHandler.ServeHTTP(w, r)
 			return
 		}
 		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		gz := gzPool.Get().(*gzip.Writer)
 		defer gzPool.Put(gz)
 		gz.Reset(w)

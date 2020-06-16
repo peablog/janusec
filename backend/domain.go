@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,24 +62,39 @@ func IsStaticDir(domain string, path string) bool {
 	}
 	vv, _ := DomainsMap.Load(domain)
 	app := vv.(models.DomainRelation).App
-	fileExts := [6]string{".js", ".css", ".png", ".svg", ".jpg", ".jpeg"}
+	fileExts := [8]string{".js", ".css", ".png", ".svg", ".jpg", ".jpeg", ".ttf", ".otf"}
 	for _, ext := range fileExts {
 		if strings.HasSuffix(path, ext) {
 			localStaticFile := "./cdn_static_files/" + strconv.Itoa(int(app.ID)) + path
 			if _, err := os.Stat(localStaticFile); os.IsNotExist(err) {
-				fmt.Println("FileNotExist try get from origin site:", localStaticFile)
 				targetUrl := app.InternalScheme + "://" + app.Destinations[0].Destination + path
+				fmt.Println("FileNotExist try get from origin site:", targetUrl)
 				req, err := http.NewRequest("GET", targetUrl, nil)
 				utils.CheckError("new cache request error", err)
-				req.Host = domain
+				// 源站地址
+				var desAddr string
+				if strings.Contains(app.Destinations[0].Destination, ":") {
+					desAddr = strings.Split(app.Destinations[0].Destination, ":")[0]
+				} else {
+					desAddr = app.Destinations[0].Destination
+				}
+				isDomain, _ := regexp.MatchString("[a-zA-Z]", desAddr)
+				// 如果源站配置的域名则使用域名回源，否则使用IP
+				if isDomain {
+					req.Host = desAddr
+				} else {
+					req.Host = domain
+				}
 				client := &http.Client{}
 				resp, err := client.Do(req)
 				utils.CheckError("do cache request error", err)
 				defer resp.Body.Close()
 				if resp.StatusCode != 200 {
+					fmt.Println("should cache but StatusCode mismatch: ", resp.StatusCode)
 					return false
 				}
-				if len(resp.Header["Content-Type"]) > 0 && !utils.Contains([]string{"image", "text/css", "application/javascript"}, resp.Header["Content-Type"][0]) {
+				if len(resp.Header["Content-Type"]) > 0 && !utils.Contains([]string{"image/png", "image/jpeg", "image/svg+xml", "text/css", "text/css; charset=utf-8", "application/javascript", "binary/octet-stream", "application/octet-stream"}, resp.Header["Content-Type"][0]) {
+					fmt.Println("should cache but content-type mismatch: ", resp.Header["Content-Type"][0])
 					return false
 				}
 				pathAll := utils.GetDirAll(localStaticFile)
